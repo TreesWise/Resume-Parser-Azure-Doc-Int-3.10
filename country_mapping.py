@@ -237,5 +237,6 @@ country_mapping = {
     'Yemeni': 'Yemen',
     'Zambian': 'Zambia',
     'Zimbabwean': 'Zimbabwe',
-    'Russia\nRussia':'Russian Federation'
+    'Russia\nRussia':'Russian Federation',
+    'United States of America':'United States'
 }
