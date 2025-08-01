@@ -3329,6 +3329,24 @@ mapping_dict = {
     'Proficiency in survival Craft & Rescue Boats other than fast rescue boats':'Proficiency in Survival Craft & Rescue Boats A-VI/2-1',
     'Advanced Liquefied Gas Tanker Cargo Operation':'Advanced Liquefied Gas Tanker Cargo Operation A-V/1-2-2',
     'Updating for Captain':'STCW 2010 Refresher & Training (Mexican)',
-    'Rescue Boats':'Proficiency in Survival Craft & Rescue Boats A-VI/2-1'
+    'Rescue Boats':'Proficiency in Survival Craft & Rescue Boats A-VI/2-1',
+    'Visa (C1/D)':'US C1/D Crew Member/Transit Visa',
+    'US Visa (C1/D)':'US C1/D Crew Member/Transit Visa',
+    'Visa (United States)':'US C1/D Crew Member/Transit Visa',
+    'Visa (United States, C1/D)':'US C1/D Crew Member/Transit Visa',
+    'Visa (United States of America)':'US C1/D Crew Member/Transit Visa',
+    'Visa - C1/D':'US C1/D Crew Member/Transit Visa',
+    'United States Visa (C1/D)':'US C1/D Crew Member/Transit Visa',
+    'United States Visa':'US C1/D Crew Member/Transit Visa',
+    'Visa (United States of America)':'US C1/D Crew Member/Transit Visa',
+    'C1/D Visa':'US C1/D Crew Member/Transit Visa',
+    'Visa - United States of America':'US C1/D Crew Member/Transit Visa',
+    'Visa(C1/D)':'US C1/D Crew Member/Transit Visa',
+    'United States Visa(Crew Visa)':'US C1/D Crew Member/Transit Visa',
+    'Visa-C1/D':'US C1/D Crew Member/Transit Visa',
+    'Visa(C1/D)':'US C1/D Crew Member/Transit Visa',
+    'Visa(United States of America-C1/D)':'US C1/D Crew Member/Transit Visa',
+    'Visa C1/D':'US C1/D Crew Member/Transit Visa',
+    'VisaC1/D':'US C1/D Crew Member/Transit Visa'
 
 }
