@@ -544,6 +544,33 @@ async def upload_file(
         certificate_table_merge = cert_out['certificate_table']
         print("certificate_table_merge")
         print(certificate_table_merge)
+
+
+
+
+         # --- Inject Gender Logic ---
+        if basic_details_merge and len(basic_details_merge) > 1:
+            header = basic_details_merge[0]
+            values = basic_details_merge[1]
+
+            gender_index = None
+            for keyy, value in header.items():
+                if value.lower() == "gender":
+                    gender_index = keyy
+                    break
+
+            if gender_index is not None:
+                gender_value = str(values.get(gender_index, "")).strip().lower()
+
+                if gender_value not in ["male", "female"]:
+                    values[gender_index] = "Male"
+                else:
+                    values[gender_index] = gender_value.capitalize()
+        # --------------------------
+
+        
+
+
         
         
         # experience_table_merge = expe_out['experience_table']
