@@ -877,3 +877,188 @@ async def upload_file(api_key: str = Depends(verify_api_key), file: UploadFile =
             os.remove(temp_file_path)
 
 
+# ----------------------------
+# Database connection
+# ----------------------------
+def get_db_engine():
+    # Adjust this as per your SQL Server credentials/environment
+    connection_string = (
+        "mssql+pyodbc://@10.201.1.86,50001/Resume_Parser"
+        "?driver=ODBC+Driver+17+for+SQL+Server"
+        "&trusted_connection=yes"
+    )
+    return create_engine(connection_string)
+
+# ----------------------------
+# API Input Model
+# ----------------------------
+class DocumentMapping(BaseModel):
+    unidentified_doc_name: str
+    mapped_doc_name: str
+
+
+@app.post("/insert-temp-documents/")
+def insert_temp_documents(
+    api_key: str = Depends(verify_api_key),
+    mappings: List[Dict[str, str]] = Body(...)
+):
+    try:
+        if not mappings or not isinstance(mappings[0], dict):
+            return {"error": "Invalid format. Expected a dictionary inside a list."}
+
+        flat_map = mappings[0]
+        df = pd.DataFrame([
+            {"unidentified_doc_name": k, "mapped_doc_name": v}
+            for k, v in flat_map.items()
+        ])
+        df['status'] = 'pending'
+        df['CreatedDate'] = datetime.now()
+
+        engine = get_db_engine()
+        df.to_sql('temp_table', con=engine, if_exists='append', index=False)
+
+        return {"message": f"{len(df)} document(s) inserted as pending."}
+    except Exception as e:
+        return {"error": f"Insertion failed: {str(e)}"}
+
+
+# ----------------------------
+# Scheduled Task: Export to Excel and upload to Blob
+# ----------------------------
+def export_data_to_excel():
+    try:
+        engine = get_db_engine()
+        with engine.begin() as conn:
+            # Select pending docs from previous dates
+            result = conn.execute(text("""
+                SELECT * FROM temp_table 
+                WHERE status = 'pending' AND CAST(CreatedDate AS DATE) < CAST(GETDATE() AS DATE)
+            """))
+            data = result.fetchall()
+            if not data:
+                return  # Nothing to export
+
+            df = pd.DataFrame(data, columns=result.keys())
+
+            # Export to Excel (in-memory)
+            excel_buffer = io.BytesIO()
+            df.to_excel(excel_buffer, index=False)
+            excel_buffer.seek(0)
+
+            # Upload to Azure Blob Storage with 'exported' in name
+            blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+            blob_name = f"verification_documents_exported_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            blob_client = blob_service_client.get_blob_client(container=os.getenv("AZURE_BLOB_CONTAINER_NAME"), blob=blob_name)
+            blob_client.upload_blob(excel_buffer, overwrite=True)
+
+            # Update and delete exported rows from temp_table
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE temp_table SET status = 'exported' 
+                    WHERE status = 'pending' AND CAST(CreatedDate AS DATE) < CAST(GETDATE() AS DATE)
+                """))
+                conn.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
+
+    except Exception as e:
+        print(f"Export Error: {str(e)}")
+
+# ----------------------------
+# Get latest replied blob (manual reply must be uploaded to blob)
+# ----------------------------
+def get_latest_replied_blob_name():
+    """
+    Fetch the most recently modified blob that represents a replied document.
+    Replied files must follow the naming: verification_documents_replied_YYYYMMDD.xlsx
+    """
+    blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+    container_client = blob_service_client.get_container_client(os.getenv("AZURE_BLOB_CONTAINER_NAME"))
+
+    # Filter only replied files
+    blobs = list(container_client.list_blobs(name_starts_with="verification_documents_replied_"))
+    replied_blobs = sorted(
+        [b for b in blobs if b.name.endswith(".xlsx")],
+        key=lambda b: b.last_modified,
+        reverse=True
+    )
+
+    if not replied_blobs:
+        raise Exception("No replied verification documents found in blob storage.")
+
+    return replied_blobs[0].name
+
+# ----------------------------
+# Insert data from replied Excel into master table
+# ----------------------------
+def insert_data_from_blob(blob_name: str):
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+        blob_data = blob_service_client.get_blob_client(container=os.getenv("AZURE_BLOB_CONTAINER_NAME"), blob=blob_name).download_blob().readall()
+        df = pd.read_excel(io.BytesIO(blob_data))
+
+        # Insert into master table
+        engine = get_db_engine()
+        with engine.begin() as conn:
+            for _, row in df.iterrows():
+                conn.execute(text("""
+                    INSERT INTO [dbo].[Master_unidentified_doc_Table]
+                    (unidentified_doc_name, mapped_doc_name, uploaded_date, status)
+                    VALUES (:unidentified_doc_name, :mapped_doc_name, :uploaded_date, :status)
+                """), {
+                    "unidentified_doc_name": row['unidentified_doc_name'],
+                    "mapped_doc_name": row['mapped_doc_name'],
+                    "uploaded_date": row['CreatedDate'],
+                    "status": row['status']
+                })
+
+    except Exception as e:
+        print(f"Insertion from blob failed: {str(e)}")
+
+# ----------------------------
+# Combined scheduled task
+# ----------------------------
+def run_both_tasks():
+    """
+    1. Export pending records from temp_table to Azure blob as 'exported'
+    2. Look for latest replied Excel from blob storage and insert into master table
+    """
+    export_data_to_excel()
+    try:
+        latest_blob = get_latest_replied_blob_name()
+        insert_data_from_blob(latest_blob)
+    except Exception as e:
+        print(f"Insert skipped: {str(e)}")
+
+# ----------------------------
+# Scheduler: Runs on app startup: For the testing process
+# ----------------------------
+# @app.on_event("startup")
+# async def start_scheduler():
+#     """
+#     Scheduler that runs the full workflow daily at a specific time.
+#     In production, change time appropriately (e.g., weekly Monday at 00:00).
+#     Currently set to run once every day at 09:30 AM.
+#     """
+#     def run_scheduler():
+#         schedule.every().day.at("09:35").do(run_both_tasks)  # Run daily at 9:30 AM
+#         print("Scheduled run_both_tasks at 09:35 AM daily.")
+#         while True:
+#             schedule.run_pending()
+#             time.sleep(60)
+
+#     import threading
+#     threading.Thread(target=run_scheduler, daemon=True).start()
+
+
+
+# ----------------------------
+# Startup scheduler (background)
+# ----------------------------
+@app.on_event("startup")
+async def start_scheduler():
+    def run_scheduler():
+        schedule.every().monday.at("00:00").do(run_both_tasks)
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    import threading
+    threading.Thread(target=run_scheduler, daemon=True).start()
