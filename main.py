@@ -891,40 +891,68 @@ async def upload_file(api_key: str = Depends(verify_api_key), file: UploadFile =
 
 
 
-# Database connection
+
+# Set the path for your local SQLite database file
+sqlite_db_path = "Resume_Parser.db"
+
+# Define base for SQLAlchemy ORM mapping
+Base = declarative_base()
+
+# Database connection (SQLite)
 
 def get_db_engine():
-    # Adjust this as per your SQL Server credentials/environment
-    connection_string = (
-        "mssql+pyodbc://@10.201.1.86,50001/Resume_Parser"
-        "?driver=ODBC+Driver+17+for+SQL+Server"
-        "&trusted_connection=yes"
-    )
+    # Change the connection string to use SQLite
+    connection_string = f"sqlite:///{sqlite_db_path}"
     return create_engine(connection_string)
 
+# Check if tables exist, and create them if they don't
+
+def create_tables():
+    engine = get_db_engine()
+    inspector = inspect(engine)
+    # Check if the tables already exist
+    if not inspector.has_table('temp_table'):
+        Base.metadata.create_all(engine)  # Create tables if they don't exist
+
+# Define the tables using SQLAlchemy ORM (for SQLite)
+
+class TempDocument(Base):
+    __tablename__ = 'temp_table'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    unidentified_doc_name = Column(String, nullable=False)
+    mapped_doc_name = Column(String, nullable=False)
+    status = Column(String, default='pending')
+    CreatedDate = Column(DateTime, default=datetime.now)
+
+class MasterDocument(Base):
+    __tablename__ = 'Master_unidentified_doc_Table'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    unidentified_doc_name = Column(String, nullable=False)
+    mapped_doc_name = Column(String, nullable=False)
+    uploaded_date = Column(DateTime, default=datetime.now)
+    status = Column(String, default='pending')
+
+# Initialize the tables at startup, but only if they don't exist
+create_tables()
 
 # API Input Model
-
 class DocumentMapping(BaseModel):
     unidentified_doc_name: str
     mapped_doc_name: str
 
-
 @app.post("/insert-temp-documents/")
 def insert_temp_documents(
     api_key: str = Depends(verify_api_key),
-    mappings: List[Dict[str, str]] = Body(...)
-    # mappings: List[DocumentMapping] = Body(...)
+    mappings: List[Dict[str, str]] = Body(...),
 ):
     try:
         if not mappings or not isinstance(mappings[0], dict):
             return {"error": "Invalid format. Expected a dictionary inside a list."}
 
         flat_map = mappings[0]
-        df = pd.DataFrame([
-            {"unidentified_doc_name": k, "mapped_doc_name": v}
-            for k, v in flat_map.items()
-        ])
+        df = pd.DataFrame([{"unidentified_doc_name": k, "mapped_doc_name": v} for k, v in flat_map.items()])
         df['status'] = 'pending'
         df['CreatedDate'] = datetime.now()
 
@@ -935,8 +963,6 @@ def insert_temp_documents(
     except Exception as e:
         return {"error": f"Insertion failed: {str(e)}"}
 
-
-
 # Scheduled Task: Export to Excel and upload to Blob
 
 def export_data_to_excel():
@@ -946,9 +972,10 @@ def export_data_to_excel():
             # Select pending docs from previous dates
             result = conn.execute(text("""
                 SELECT * FROM temp_table 
-                WHERE status = 'pending' AND CAST(CreatedDate AS DATE) < CAST(GETDATE() AS DATE)
+                WHERE TRIM(status) = 'pending' AND DATE(CreatedDate) < DATE('now')
             """))
             data = result.fetchall()
+            print(f"Fetched Data from temp_table: {data}")
             if not data:
                 return  # Nothing to export
 
@@ -969,13 +996,12 @@ def export_data_to_excel():
             with engine.begin() as conn:
                 conn.execute(text("""
                     UPDATE temp_table SET status = 'exported' 
-                    WHERE status = 'pending' AND CAST(CreatedDate AS DATE) < CAST(GETDATE() AS DATE)
+                    WHERE status = 'pending' AND DATE(CreatedDate) < DATE('now')
                 """))
                 conn.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
 
     except Exception as e:
         print(f"Export Error: {str(e)}")
-
 
 # Get latest replied blob (manual reply must be uploaded to blob)
 
@@ -1000,32 +1026,44 @@ def get_latest_replied_blob_name():
 
     return replied_blobs[0].name
 
-# Insert data from replied Excel into master table
-
 def insert_data_from_blob(blob_name: str):
     try:
         blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
         blob_data = blob_service_client.get_blob_client(container=os.getenv("AZURE_BLOB_CONTAINER_NAME"), blob=blob_name).download_blob().readall()
         df = pd.read_excel(io.BytesIO(blob_data))
 
-        # Insert into master table
+        # Insert into master table (SQLite-compatible schema)
         engine = get_db_engine()
         with engine.begin() as conn:
             for _, row in df.iterrows():
-                conn.execute(text("""
-                    INSERT INTO [dbo].[Master_unidentified_doc_Table]
-                    (unidentified_doc_name, mapped_doc_name, uploaded_date, status)
-                    VALUES (:unidentified_doc_name, :mapped_doc_name, :uploaded_date, :status)
+                # Check if the record already exists in Master_unidentified_doc_Table
+                existing = conn.execute(text("""
+                    SELECT 1 FROM Master_unidentified_doc_Table 
+                    WHERE unidentified_doc_name = :unidentified_doc_name 
+                    AND mapped_doc_name = :mapped_doc_name 
+                    AND uploaded_date = :uploaded_date
                 """), {
                     "unidentified_doc_name": row['unidentified_doc_name'],
                     "mapped_doc_name": row['mapped_doc_name'],
-                    "uploaded_date": row['CreatedDate'],
-                    "status": row['status']
-                })
+                    "uploaded_date": row['CreatedDate']
+                }).fetchone()
+
+                if not existing:  # Insert only if the record does not exist
+                    conn.execute(text("""
+                        INSERT INTO Master_unidentified_doc_Table
+                        (unidentified_doc_name, mapped_doc_name, uploaded_date, status)
+                        VALUES (:unidentified_doc_name, :mapped_doc_name, :uploaded_date, :status)
+                    """), {
+                        "unidentified_doc_name": row['unidentified_doc_name'],
+                        "mapped_doc_name": row['mapped_doc_name'],
+                        "uploaded_date": row['CreatedDate'],
+                        "status": row['status']
+                    })
+
+        print(f"Data from {blob_name} inserted successfully.")
 
     except Exception as e:
         print(f"Insertion from blob failed: {str(e)}")
-
 # Combined scheduled task
 
 def run_both_tasks():
@@ -1041,26 +1079,23 @@ def run_both_tasks():
         print(f"Insert skipped: {str(e)}")
 
 
-# Scheduler: Runs on app startup: For the testing process
+
 
 # @app.on_event("startup")
 # async def start_scheduler():
 #     """
-#     Scheduler that runs the full workflow daily at a specific time.
-#     In production, change time appropriately (e.g., weekly Monday at 00:00).
-#     Currently set to run once every day at 09:30 AM.
+#     Scheduler that runs the full workflow at 16:11 PM daily.
+#     Change the time as needed for production.
 #     """
 #     def run_scheduler():
-#         schedule.every().day.at("09:35").do(run_both_tasks)  # Run daily at 9:30 AM
-#         print("Scheduled run_both_tasks at 09:35 AM daily.")
+#         schedule.every().day.at("16:11").do(run_both_tasks)  # Run daily at 1:16 PM
+#         print("Scheduled run_both_tasks at 16:11 PM daily.")
 #         while True:
 #             schedule.run_pending()
 #             time.sleep(60)
 
 #     import threading
 #     threading.Thread(target=run_scheduler, daemon=True).start()
-
-
 
 
 # Startup scheduler (background)
@@ -1074,4 +1109,3 @@ async def start_scheduler():
             time.sleep(60)
     import threading
     threading.Thread(target=run_scheduler, daemon=True).start()
-
