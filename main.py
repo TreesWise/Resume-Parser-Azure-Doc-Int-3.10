@@ -913,8 +913,8 @@ class DocumentMapping(BaseModel):
 @app.post("/insert-temp-documents/")
 def insert_temp_documents(
     api_key: str = Depends(verify_api_key),
-    # mappings: List[Dict[str, str]] = Body(...)
-    mappings: List[DocumentMapping] = Body(...)
+    mappings: List[Dict[str, str]] = Body(...)
+    # mappings: List[DocumentMapping] = Body(...)
 ):
     try:
         if not mappings or not isinstance(mappings[0], dict):
