@@ -742,33 +742,51 @@ def view_temp_documents(api_key: str = Depends(verify_api_key)):
 
 
 
+@app.post("/delete-temp-documents/")
+def delete_temp_documents(api_key: str = Depends(verify_api_key)):
+    try:
+        engine = get_db_engine()
+
+        # Use engine.begin() for automatic transaction handling and committing
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM temp_table"))
+        
+        return {"message": "All documents from temp_table have been deleted."}
+    except Exception as e:
+        return {"error": f"Deletion failed: {str(e)}"}
 
 
-# @app.on_event("startup")
-# async def start_scheduler():
-#     """
-#     Scheduler that runs the full workflow at 16:11 PM daily.
-#     Change the time as needed for production.
-#     """
-#     def run_scheduler():
-#         schedule.every().day.at("16:11").do(run_both_tasks)  # Run daily at 1:16 PM
-#         print("Scheduled run_both_tasks at 16:11 PM daily.")
-#         while True:
-#             schedule.run_pending()
-#             time.sleep(60)
 
-#     import threading
-#     threading.Thread(target=run_scheduler, daemon=True).start()
+@app.on_event("startup")
+async def start_scheduler():
+    """
+    Scheduler that runs the full workflow at 10:00 AM daily.
+    Change the time as needed for production.
+    """
+    def run_scheduler():
+        schedule.every().day.at("10:00").do(run_both_tasks)  # Run daily at 10:00 AM
+        print("Scheduled run_both_tasks at 10:00 AM daily.")
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+
+    import threading
+    threading.Thread(target=run_scheduler, daemon=True).start()
+
+
+
+
+
 
 
 # Startup scheduler (background)
 
-@app.on_event("startup")
-async def start_scheduler():
-    def run_scheduler():
-        schedule.every().monday.at("00:00").do(run_both_tasks)
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
-    import threading
-    threading.Thread(target=run_scheduler, daemon=True).start()
+# @app.on_event("startup")
+# async def start_scheduler():
+#     def run_scheduler():
+#         schedule.every().monday.at("00:00").do(run_both_tasks)
+#         while True:
+#             schedule.run_pending()
+#             time.sleep(60)
+#     import threading
+#     threading.Thread(target=run_scheduler, daemon=True).start()
