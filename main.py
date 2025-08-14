@@ -566,6 +566,8 @@ class DocumentMapping(BaseModel):
     unidentified_doc_name: str
     mapped_doc_name: str
 
+
+
 @app.post("/insert-temp-documents/")
 def insert_temp_documents(
     api_key: str = Depends(verify_api_key),
@@ -575,8 +577,12 @@ def insert_temp_documents(
         if not mappings or not isinstance(mappings[0], dict):
             return {"error": "Invalid format. Expected a dictionary inside a list."}
 
-        flat_map = mappings[0]
-        df = pd.DataFrame([{"unidentified_doc_name": k, "mapped_doc_name": v} for k, v in flat_map.items()])
+        # Use the entire mappings list
+        df = pd.DataFrame([
+            {"unidentified_doc_name": item["unidentified_doc_name"], "mapped_doc_name": item["mapped_doc_name"]}
+            for item in mappings
+        ])
+        
         df['status'] = 'pending'
         df['CreatedDate'] = datetime.now()
 
@@ -586,6 +592,9 @@ def insert_temp_documents(
         return {"message": f"{len(df)} document(s) inserted as pending."}
     except Exception as e:
         return {"error": f"Insertion failed: {str(e)}"}
+
+
+
 
 # Scheduled Task: Export to Excel and upload to Blob
 
