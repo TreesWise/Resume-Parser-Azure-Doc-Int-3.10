@@ -705,6 +705,36 @@ def run_both_tasks():
 
 
 
+@app.get("/view-temp-documents/")
+def view_temp_documents(api_key: str = Depends(verify_api_key)):
+    try:
+        engine = get_db_engine()
+        # Open a session to query the database
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        session = SessionLocal()
+
+        # Query all records from temp_table
+        result = session.query(TempDocument).all()
+
+        # Convert the result to a list of dictionaries, converting datetime to string
+        data = [{
+            "id": record.id,
+            "unidentified_doc_name": record.unidentified_doc_name, 
+            "mapped_doc_name": record.mapped_doc_name,
+            "status": record.status, 
+            "CreatedDate": record.CreatedDate.strftime('%Y-%m-%d %H:%M:%S') if record.CreatedDate else None
+        } for record in result]
+
+        # Return the data as a JSON response
+        return JSONResponse(content={"data": data})
+
+    except Exception as e:
+        return {"error": f"Failed to fetch data: {str(e)}"}
+
+
+
+
+
 # @app.on_event("startup")
 # async def start_scheduler():
 #     """
