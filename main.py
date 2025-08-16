@@ -536,6 +536,8 @@ os.makedirs(DB_DIR, exist_ok=True)
 sqlite_db_path = os.path.join(DB_DIR, "Resume_Parser.db")
 print(f"[BOOT] Using SQLite at: {sqlite_db_path}", flush=True)
 
+
+
 # ------------------------------------------------------------------------------
 # SQLAlchemy setup
 # ------------------------------------------------------------------------------
@@ -825,25 +827,30 @@ def delete_temp_documents(api_key: str = Depends(verify_api_key)):
 # ------------------------------------------------------------------------------
 # Scheduler (12:45 AM IST daily) with single-instance guard
 # ------------------------------------------------------------------------------
-scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+
+SCHED_TZ = pytz.timezone("Asia/Kolkata")
+scheduler = AsyncIOScheduler(timezone=SCHED_TZ)
 SCHED_LOCK_PATH = "/tmp/scheduler.lock"
+
 
 def start_scheduler_guarded():
     if os.getenv("RUN_SCHEDULER", "0") != "1":
         print("[SCHEDULER] Skipped (RUN_SCHEDULER not set)", flush=True)
         return
+
     lock = FileLock(SCHED_LOCK_PATH)
     try:
         with lock.acquire(timeout=0):  # only one worker wins
             scheduler.add_job(
                 run_both_tasks,
-                CronTrigger(hour=1, minute=30),  # 1:30 AM IST
+                CronTrigger(hour=2, minute=10, timezone=SCHED_TZ),  # 2:10 AM IST
                 id="run_both_tasks_daily",
                 replace_existing=True
             )
             scheduler.start()
-            print("[SCHEDULER] APScheduler started", flush=True)
             job = scheduler.get_job("run_both_tasks_daily")
+            print("[SCHEDULER] APScheduler started", flush=True)
+            print("[SCHEDULER] TZ:", scheduler.timezone, flush=True)
             print("[SCHEDULER] Next run time:", job.next_run_time, flush=True)
     except Timeout:
         print("[SCHEDULER] Skipped (another worker owns the scheduler)", flush=True)
