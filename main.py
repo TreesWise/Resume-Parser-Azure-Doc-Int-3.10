@@ -837,7 +837,7 @@ def start_scheduler_guarded():
         with lock.acquire(timeout=0):  # only one worker wins
             scheduler.add_job(
                 run_both_tasks,
-                CronTrigger(hour=1, minute=15),  # 1:15 AM IST
+                CronTrigger(hour=1, minute=30),  # 1:30 AM IST
                 id="run_both_tasks_daily",
                 replace_existing=True
             )
