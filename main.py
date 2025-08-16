@@ -770,12 +770,12 @@ async def start_scheduler():
     # Do NOT run immediately. Only run at the scheduled time.
     scheduler.add_job(
         run_both_tasks,
-        CronTrigger(hour=15, minute=50),  # <-- 3:50 PM IST daily
+        CronTrigger(hour=16, minute=30),  # <-- 16:30 PM IST daily
         id="run_both_tasks_daily",
         replace_existing=True
     )
     scheduler.start()
-    print("APScheduler started: daily 15:50 Asia/Kolkata")
+    print("APScheduler started: daily 16:30 Asia/Kolkata")
 
 @app.on_event("shutdown")
 async def shutdown_scheduler():
