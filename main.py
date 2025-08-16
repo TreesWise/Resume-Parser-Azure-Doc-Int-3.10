@@ -770,12 +770,12 @@ scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 async def start_scheduler():
     scheduler.add_job(
         run_both_tasks,
-        CronTrigger(hour=19, minute=15),  # 19:15 PM IST daily
+        CronTrigger(hour=19, minute=45),  # 19:45 PM IST daily
         id="run_both_tasks_daily",
         replace_existing=True # prevents immediate run
     )
     scheduler.start()
-    print("APScheduler started: daily 19:15 Asia/Kolkata")
+    print("APScheduler started: daily 19:45 Asia/Kolkata")
     job = scheduler.get_job("run_both_tasks_daily")
     print("Next run time (UTC):", job.next_run_time)
 
