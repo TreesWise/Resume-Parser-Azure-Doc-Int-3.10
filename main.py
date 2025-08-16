@@ -33,6 +33,10 @@ from azure.storage.blob import BlobServiceClient
 from pydantic import BaseModel
 import sqlite3
 from datetime import datetime
+from sqlalchemy import text
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
 
 
 
@@ -757,21 +761,26 @@ def delete_temp_documents(api_key: str = Depends(verify_api_key)):
 
 
 
+
+
+scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+
 @app.on_event("startup")
 async def start_scheduler():
-    """
-    Scheduler that runs the full workflow at 10:00 AM daily.
-    Change the time as needed for production.
-    """
-    def run_scheduler():
-        schedule.every().day.at("10:00").do(run_both_tasks)  # Run daily at 10:00 AM
-        print("Scheduled run_both_tasks at 10:00 AM daily.")
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
+    # Do NOT run immediately. Only run at the scheduled time.
+    scheduler.add_job(
+        run_both_tasks,
+        CronTrigger(hour=14, minute=45),  # <-- 2:45 PM IST daily
+        id="run_both_tasks_daily",
+        replace_existing=True
+    )
+    scheduler.start()
+    print("APScheduler started: daily 14:45 Asia/Kolkata")
 
-    import threading
-    threading.Thread(target=run_scheduler, daemon=True).start()
+@app.on_event("shutdown")
+async def shutdown_scheduler():
+    scheduler.shutdown(wait=False)
+    print("APScheduler stopped")
 
 
 
