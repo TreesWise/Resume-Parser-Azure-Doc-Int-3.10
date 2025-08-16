@@ -38,7 +38,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 from filelock import FileLock, Timeout
-
+from azure.core.exceptions import ResourceExistsError
 
 
 from dotenv import load_dotenv
@@ -843,7 +843,7 @@ def start_scheduler_guarded():
         with lock.acquire(timeout=0):  # only one worker wins
             scheduler.add_job(
                 run_both_tasks,
-                CronTrigger(hour=2, minute=30, timezone=SCHED_TZ),  # 2:30 AM IST
+                CronTrigger(hour=2, minute=45, timezone=SCHED_TZ),  # 2:45 AM IST
                 id="run_both_tasks_daily",
                 replace_existing=True
             )
