@@ -520,33 +520,48 @@ async def upload_file(api_key: str = Depends(verify_api_key), file: UploadFile =
 
 
 
-# Set the path for your local SQLite database file
-sqlite_db_path = "Resume_Parser.db"
 
-# Define base for SQLAlchemy ORM mapping
+
+#code change by adding the local database
+
+
+
+
+# ------------------------------------------------------------------------------
+# PERSISTENT, ABSOLUTE DB PATH (works in Azure and locally)
+# ------------------------------------------------------------------------------
+APP_HOME = os.environ.get("HOME", "/home")  # '/home' is the writable mount on Linux App Service
+DB_DIR = os.path.join(APP_HOME, "data")
+os.makedirs(DB_DIR, exist_ok=True)
+
+sqlite_db_path = os.path.join(DB_DIR, "Resume_Parser.db")
+print(f"[BOOT] Using SQLite at: {sqlite_db_path}", flush=True)
+
+# ------------------------------------------------------------------------------
+# SQLAlchemy setup
+# ------------------------------------------------------------------------------
 Base = declarative_base()
 
-# Database connection (SQLite)
-
 def get_db_engine():
-    # Change the connection string to use SQLite
+    # IMPORTANT: allow SQLite access from APScheduler's thread
     connection_string = f"sqlite:///{sqlite_db_path}"
-    return create_engine(connection_string)
-
-# Check if tables exist, and create them if they don't
+    print(f"[DB] Creating engine: {connection_string}", flush=True)
+    return create_engine(connection_string, connect_args={"check_same_thread": False})
 
 def create_tables():
+    print("[DB] Checking/creating tables if needed...", flush=True)
     engine = get_db_engine()
     inspector = inspect(engine)
-    # Check if the tables already exist
-    if not inspector.has_table('temp_table'):
-        Base.metadata.create_all(engine)  # Create tables if they don't exist
-
-# Define the tables using SQLAlchemy ORM (for SQLite)
+    has_temp = inspector.has_table('temp_table')
+    has_master = inspector.has_table('Master_unidentified_doc_Table')
+    if not (has_temp and has_master):
+        Base.metadata.create_all(engine)
+        print("[DB] Tables created (if any were missing).", flush=True)
+    else:
+        print("[DB] Tables already exist.", flush=True)
 
 class TempDocument(Base):
     __tablename__ = 'temp_table'
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     unidentified_doc_name = Column(String, nullable=False)
     mapped_doc_name = Column(String, nullable=False)
@@ -555,7 +570,6 @@ class TempDocument(Base):
 
 class MasterDocument(Base):
     __tablename__ = 'Master_unidentified_doc_Table'
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     unidentified_doc_name = Column(String, nullable=False)
     mapped_doc_name = Column(String, nullable=False)
@@ -565,127 +579,171 @@ class MasterDocument(Base):
 # Initialize the tables at startup, but only if they don't exist
 create_tables()
 
+# ------------------------------------------------------------------------------
 # API Input Model
+# ------------------------------------------------------------------------------
 class DocumentMapping(BaseModel):
     unidentified_doc_name: str
     mapped_doc_name: str
 
-
-
+# ------------------------------------------------------------------------------
+# API: insert temp documents
+# ------------------------------------------------------------------------------
 @app.post("/insert-temp-documents/")
 def insert_temp_documents(
     api_key: str = Depends(verify_api_key),
     mappings: List[Dict[str, str]] = Body(...),
 ):
+    print("[API] /insert-temp-documents called", flush=True)
     try:
         if not mappings or not isinstance(mappings[0], dict):
+            print("[API] Invalid input format", flush=True)
             return {"error": "Invalid format. Expected a dictionary inside a list."}
 
-        # Use the entire mappings list
+        print(f"[API] Received {len(mappings)} mappings", flush=True)
         df = pd.DataFrame([
             {"unidentified_doc_name": item["unidentified_doc_name"], "mapped_doc_name": item["mapped_doc_name"]}
             for item in mappings
         ])
-        
         df['status'] = 'pending'
         df['CreatedDate'] = datetime.now()
+        print(f"[API] Prepared dataframe with {len(df)} rows", flush=True)
 
         engine = get_db_engine()
+        print(f"[SANITY] DB path (insert) = {sqlite_db_path}", flush=True)
         df.to_sql('temp_table', con=engine, if_exists='append', index=False)
+        print("[API] Inserted rows into temp_table", flush=True)
 
         return {"message": f"{len(df)} document(s) inserted as pending."}
     except Exception as e:
+        print(f"[API] Insertion failed: {e}", flush=True)
         return {"error": f"Insertion failed: {str(e)}"}
 
-
-
-
+# ------------------------------------------------------------------------------
 # Scheduled Task: Export to Excel and upload to Blob
-
+# ------------------------------------------------------------------------------
 def export_data_to_excel():
+    print("[TASK] export_data_to_excel START", flush=True)
     try:
+        print(f"[SANITY] DB path (export) = {sqlite_db_path}", flush=True)
+        print(f"[SANITY] AZURE_BLOB_CONTAINER_NAME = {os.getenv('AZURE_BLOB_CONTAINER_NAME')}", flush=True)
+        print(f"[SANITY] AZ conn str present? {bool(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))}", flush=True)
+
         engine = get_db_engine()
         with engine.begin() as conn:
-            # Select pending docs from previous dates
+            # Select pending docs
+            print("[TASK] Querying pending rows from temp_table...", flush=True)
             result = conn.execute(text("""
                 SELECT * FROM temp_table 
-                WHERE TRIM(status) = 'pending' 
+                WHERE TRIM(status) = 'pending'
             """))
             data = result.fetchall()
-            print(f"Fetched Data from temp_table: {data}")
+            print(f"[TASK] Fetched {len(data)} rows", flush=True)
             if not data:
-                return  # Nothing to export
+                print("[TASK] Nothing to export. Returning.", flush=True)
+                return
 
             df = pd.DataFrame(data, columns=result.keys())
+            print(f"[TASK] DataFrame shape = {df.shape}", flush=True)
 
             # Export to Excel (in-memory)
             excel_buffer = io.BytesIO()
             df.to_excel(excel_buffer, index=False)
             excel_buffer.seek(0)
+            print("[TASK] Exported data to Excel (in-memory)", flush=True)
 
-            # Upload to Azure Blob Storage with 'exported' in name
-            blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+            # Upload to Azure Blob Storage
+            conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+            container_name = os.getenv("AZURE_BLOB_CONTAINER_NAME")
+            blob_service_client = BlobServiceClient.from_connection_string(conn_str)
+
+            # Ensure container exists (no-op if already exists)
+            container_client = blob_service_client.get_container_client(container_name)
+            try:
+                container_client.create_container()
+                print(f"[BLOB] Created container '{container_name}'", flush=True)
+            except ResourceExistsError:
+                pass
+
             blob_name = f"verification_documents_exported_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            blob_client = blob_service_client.get_blob_client(container=os.getenv("AZURE_BLOB_CONTAINER_NAME"), blob=blob_name)
+            blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
             blob_client.upload_blob(excel_buffer, overwrite=True)
+            print(f"[TASK] Uploaded Excel to blob: {blob_name}", flush=True)
 
             # Update and delete exported rows from temp_table
-            with engine.begin() as conn:
-                conn.execute(text("""
+            with engine.begin() as conn2:
+                conn2.execute(text("""
                     UPDATE temp_table SET status = 'exported' 
                     WHERE status = 'pending' 
                 """))
-                conn.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
+                print("[TASK] Updated rows to 'exported'", flush=True)
+
+                conn2.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
+                print("[TASK] Deleted exported rows", flush=True)
 
     except Exception as e:
-        print(f"Export Error: {str(e)}")
+        print(f"[TASK] Export Error: {e}", flush=True)
+    finally:
+        print("[TASK] export_data_to_excel END", flush=True)
 
-# Get latest replied blob (manual reply must be uploaded to blob)
-
+# ------------------------------------------------------------------------------
+# Get latest replied blob
+# ------------------------------------------------------------------------------
 def get_latest_replied_blob_name():
-    """
-    Fetch the most recently modified blob that represents a replied document.
-    Replied files must follow the naming: verification_documents_replied_YYYYMMDD.xlsx
-    """
-    blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
-    container_client = blob_service_client.get_container_client(os.getenv("AZURE_BLOB_CONTAINER_NAME"))
-
-    # Filter only replied files
-    blobs = list(container_client.list_blobs(name_starts_with="verification_documents_replied_"))
-    replied_blobs = sorted(
-        [b for b in blobs if b.name.endswith(".xlsx")],
-        key=lambda b: b.last_modified,
-        reverse=True
-    )
-
-    if not replied_blobs:
-        raise Exception("No replied verification documents found in blob storage.")
-
-    return replied_blobs[0].name
-
-def insert_data_from_blob(blob_name: str):
+    print("[TASK] get_latest_replied_blob_name START", flush=True)
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
-        blob_data = blob_service_client.get_blob_client(container=os.getenv("AZURE_BLOB_CONTAINER_NAME"), blob=blob_name).download_blob().readall()
-        df = pd.read_excel(io.BytesIO(blob_data))
+        conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        container = os.getenv("AZURE_BLOB_CONTAINER_NAME")
+        blob_service_client = BlobServiceClient.from_connection_string(conn_str)
+        container_client = blob_service_client.get_container_client(container)
 
-        # Insert into master table (SQLite-compatible schema)
+        blobs = list(container_client.list_blobs(name_starts_with="verification_documents_replied_"))
+        replied_blobs = sorted(
+            [b for b in blobs if b.name.endswith(".xlsx")],
+            key=lambda b: b.last_modified,
+            reverse=True
+        )
+
+        if not replied_blobs:
+            raise Exception("No replied verification documents found in blob storage.")
+
+        latest = replied_blobs[0].name
+        print(f"[TASK] Latest replied blob: {latest}", flush=True)
+        return latest
+    finally:
+        print("[TASK] get_latest_replied_blob_name END", flush=True)
+
+# ------------------------------------------------------------------------------
+# Insert data from replied blob
+# ------------------------------------------------------------------------------
+def insert_data_from_blob(blob_name: str):
+    print(f"[TASK] insert_data_from_blob START ({blob_name})", flush=True)
+    try:
+        conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        container = os.getenv("AZURE_BLOB_CONTAINER_NAME")
+        blob_service_client = BlobServiceClient.from_connection_string(conn_str)
+
+        blob_data = blob_service_client.get_blob_client(container=container, blob=blob_name)\
+            .download_blob().readall()
+        df = pd.read_excel(io.BytesIO(blob_data))
+        print(f"[TASK] Read {len(df)} rows from replied Excel; columns={list(df.columns)}", flush=True)
+
         engine = get_db_engine()
+        inserted = 0
         with engine.begin() as conn:
             for _, row in df.iterrows():
-                # Check if the record already exists in Master_unidentified_doc_Table
                 existing = conn.execute(text("""
                     SELECT 1 FROM Master_unidentified_doc_Table 
                     WHERE unidentified_doc_name = :unidentified_doc_name 
-                    AND mapped_doc_name = :mapped_doc_name 
-                    AND uploaded_date = :uploaded_date
+                      AND mapped_doc_name = :mapped_doc_name 
+                      AND uploaded_date = :uploaded_date
                 """), {
                     "unidentified_doc_name": row['unidentified_doc_name'],
                     "mapped_doc_name": row['mapped_doc_name'],
                     "uploaded_date": row['CreatedDate']
                 }).fetchone()
 
-                if not existing:  # Insert only if the record does not exist
+                if not existing:
                     conn.execute(text("""
                         INSERT INTO Master_unidentified_doc_Table
                         (unidentified_doc_name, mapped_doc_name, uploaded_date, status)
@@ -696,40 +754,42 @@ def insert_data_from_blob(blob_name: str):
                         "uploaded_date": row['CreatedDate'],
                         "status": row['status']
                     })
+                    inserted += 1
 
-        print(f"Data from {blob_name} inserted successfully.")
-
+        print(f"[TASK] Inserted {inserted} new rows into Master_unidentified_doc_Table", flush=True)
     except Exception as e:
-        print(f"Insertion from blob failed: {str(e)}")
-# Combined scheduled task
+        print(f"[TASK] Insertion from blob failed: {e}", flush=True)
+    finally:
+        print("[TASK] insert_data_from_blob END", flush=True)
 
+# ------------------------------------------------------------------------------
+# Combined scheduled task
+# ------------------------------------------------------------------------------
 def run_both_tasks():
-    """
-    1. Export pending records from temp_table to Azure blob as 'exported'
-    2. Look for latest replied Excel from blob storage and insert into master table
-    """
+    print("[JOB] run_both_tasks START", flush=True)
     export_data_to_excel()
     try:
         latest_blob = get_latest_replied_blob_name()
         insert_data_from_blob(latest_blob)
     except Exception as e:
-        print(f"Insert skipped: {str(e)}")
+        print(f"[JOB] Insert skipped: {e}", flush=True)
+    print("[JOB] run_both_tasks END", flush=True)
 
-
-
-
+# ------------------------------------------------------------------------------
+# API: view temp documents
+# ------------------------------------------------------------------------------
 @app.get("/view-temp-documents/")
 def view_temp_documents(api_key: str = Depends(verify_api_key)):
+    print("[API] /view-temp-documents called", flush=True)
     try:
+        print(f"[SANITY] DB path (view) = {sqlite_db_path}", flush=True)
         engine = get_db_engine()
-        # Open a session to query the database
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         session = SessionLocal()
 
-        # Query all records from temp_table
         result = session.query(TempDocument).all()
+        print(f"[API] Retrieved {len(result)} rows from temp_table", flush=True)
 
-        # Convert the result to a list of dictionaries, converting datetime to string
         data = [{
             "id": record.id,
             "unidentified_doc_name": record.unidentified_doc_name, 
@@ -738,12 +798,11 @@ def view_temp_documents(api_key: str = Depends(verify_api_key)):
             "CreatedDate": record.CreatedDate.strftime('%Y-%m-%d %H:%M:%S') if record.CreatedDate else None
         } for record in result]
 
-        # Return the data as a JSON response
         return JSONResponse(content={"data": data})
-
     except Exception as e:
+        print(f"[API] view-temp-documents failed: {e}", flush=True)
         return {"error": f"Failed to fetch data: {str(e)}"}
-
+    
 
 
 @app.post("/delete-temp-documents/")
@@ -762,41 +821,30 @@ def delete_temp_documents(api_key: str = Depends(verify_api_key)):
 
 
 
-
-
+# ------------------------------------------------------------------------------
+# Scheduler (20:10 IST daily, same as your code)
+# ------------------------------------------------------------------------------
 scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 
 @app.on_event("startup")
 async def start_scheduler():
-    scheduler.add_job(
-        run_both_tasks,
-        CronTrigger(hour=19, minute=45),  # 19:45 PM IST daily
-        id="run_both_tasks_daily",
-        replace_existing=True # prevents immediate run
-    )
-    scheduler.start()
-    print("APScheduler started: daily 19:45 Asia/Kolkata")
-    job = scheduler.get_job("run_both_tasks_daily")
-    print("Next run time (UTC):", job.next_run_time)
+    if os.getenv("RUN_SCHEDULER", "0") == "1":
+        scheduler.add_job(
+            run_both_tasks,
+            CronTrigger(hour=23, minute=15),
+            id="run_both_tasks_daily",
+            replace_existing=True
+        )
+        scheduler.start()
+        print("[SCHEDULER] APScheduler started", flush=True)
+        job = scheduler.get_job("run_both_tasks_daily")
+        print("[SCHEDULER] Next run time:", job.next_run_time, flush=True)
+    else:
+        print("[SCHEDULER] Skipped (RUN_SCHEDULER not set)", flush=True)
+
+
 
 @app.on_event("shutdown")
 async def shutdown_scheduler():
     scheduler.shutdown(wait=False)
-    print("APScheduler stopped")
-
-
-
-
-
-
-# Startup scheduler (background)
-
-# @app.on_event("startup")
-# async def start_scheduler():
-#     def run_scheduler():
-#         schedule.every().monday.at("00:00").do(run_both_tasks)
-#         while True:
-#             schedule.run_pending()
-#             time.sleep(60)
-#     import threading
-#     threading.Thread(target=run_scheduler, daemon=True).start()
+    print("[SCHEDULER] APScheduler stopped", flush=True)
