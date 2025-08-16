@@ -114,3 +114,4 @@ pandas==2.3.1
 schedule==1.1.0
 pyodbc==5.2.0
 APScheduler==3.11.0
+openpyxl==3.1.5
