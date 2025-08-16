@@ -609,7 +609,7 @@ def export_data_to_excel():
             # Select pending docs from previous dates
             result = conn.execute(text("""
                 SELECT * FROM temp_table 
-                WHERE TRIM(status) = 'pending' AND DATE(CreatedDate) < DATE('now')
+                WHERE TRIM(status) = 'pending' 
             """))
             data = result.fetchall()
             print(f"Fetched Data from temp_table: {data}")
@@ -633,7 +633,7 @@ def export_data_to_excel():
             with engine.begin() as conn:
                 conn.execute(text("""
                     UPDATE temp_table SET status = 'exported' 
-                    WHERE status = 'pending' AND DATE(CreatedDate) < DATE('now')
+                    WHERE status = 'pending' 
                 """))
                 conn.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
 
@@ -770,12 +770,12 @@ async def start_scheduler():
     # Do NOT run immediately. Only run at the scheduled time.
     scheduler.add_job(
         run_both_tasks,
-        CronTrigger(hour=14, minute=45),  # <-- 2:45 PM IST daily
+        CronTrigger(hour=15, minute=30),  # <-- 3:30 PM IST daily
         id="run_both_tasks_daily",
         replace_existing=True
     )
     scheduler.start()
-    print("APScheduler started: daily 14:45 Asia/Kolkata")
+    print("APScheduler started: daily 15:30 Asia/Kolkata")
 
 @app.on_event("shutdown")
 async def shutdown_scheduler():
