@@ -831,7 +831,7 @@ async def start_scheduler():
     if os.getenv("RUN_SCHEDULER", "0") == "1":
         scheduler.add_job(
             run_both_tasks,
-            CronTrigger(hour=23, minute=15),
+            CronTrigger(hour=0, minute=45),  # 12:45 AM
             id="run_both_tasks_daily",
             replace_existing=True
         )
