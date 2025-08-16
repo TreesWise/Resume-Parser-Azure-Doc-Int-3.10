@@ -37,7 +37,7 @@ from sqlalchemy import text
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
-
+from filelock import FileLock, Timeout
 
 
 
@@ -526,7 +526,6 @@ async def upload_file(api_key: str = Depends(verify_api_key), file: UploadFile =
 
 
 
-
 # ------------------------------------------------------------------------------
 # PERSISTENT, ABSOLUTE DB PATH (works in Azure and locally)
 # ------------------------------------------------------------------------------
@@ -548,18 +547,9 @@ def get_db_engine():
     print(f"[DB] Creating engine: {connection_string}", flush=True)
     return create_engine(connection_string, connect_args={"check_same_thread": False})
 
-def create_tables():
-    print("[DB] Checking/creating tables if needed...", flush=True)
-    engine = get_db_engine()
-    inspector = inspect(engine)
-    has_temp = inspector.has_table('temp_table')
-    has_master = inspector.has_table('Master_unidentified_doc_Table')
-    if not (has_temp and has_master):
-        Base.metadata.create_all(engine)
-        print("[DB] Tables created (if any were missing).", flush=True)
-    else:
-        print("[DB] Tables already exist.", flush=True)
-
+# ------------------------------------------------------------------------------
+# ORM models
+# ------------------------------------------------------------------------------
 class TempDocument(Base):
     __tablename__ = 'temp_table'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -576,8 +566,30 @@ class MasterDocument(Base):
     uploaded_date = Column(DateTime, default=datetime.now)
     status = Column(String, default='pending')
 
-# Initialize the tables at startup, but only if they don't exist
-create_tables()
+# ------------------------------------------------------------------------------
+# ONE-TIME, RACE-SAFE DB INIT (keeps existing data)
+# ------------------------------------------------------------------------------
+def init_db():
+    lock = FileLock("/tmp/db_init.lock")
+    try:
+        with lock.acquire(timeout=10):
+            engine = get_db_engine()
+            with engine.begin() as conn:
+                # Ensure temp_table exists without dropping data
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS temp_table (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        unidentified_doc_name VARCHAR NOT NULL,
+                        mapped_doc_name VARCHAR NOT NULL,
+                        status VARCHAR,
+                        "CreatedDate" DATETIME
+                    )
+                """))
+            # Create ORM tables if missing (non-destructive; no migrations)
+            Base.metadata.create_all(bind=engine, checkfirst=True)
+            print("[DB] Initialization complete", flush=True)
+    except Timeout:
+        print("[DB] Skipping init (another worker owns the lock)", flush=True)
 
 # ------------------------------------------------------------------------------
 # API Input Model
@@ -585,6 +597,9 @@ create_tables()
 class DocumentMapping(BaseModel):
     unidentified_doc_name: str
     mapped_doc_name: str
+
+
+
 
 # ------------------------------------------------------------------------------
 # API: insert temp documents
@@ -631,7 +646,6 @@ def export_data_to_excel():
 
         engine = get_db_engine()
         with engine.begin() as conn:
-            # Select pending docs
             print("[TASK] Querying pending rows from temp_table...", flush=True)
             result = conn.execute(text("""
                 SELECT * FROM temp_table 
@@ -646,18 +660,15 @@ def export_data_to_excel():
             df = pd.DataFrame(data, columns=result.keys())
             print(f"[TASK] DataFrame shape = {df.shape}", flush=True)
 
-            # Export to Excel (in-memory)
             excel_buffer = io.BytesIO()
             df.to_excel(excel_buffer, index=False)
             excel_buffer.seek(0)
             print("[TASK] Exported data to Excel (in-memory)", flush=True)
 
-            # Upload to Azure Blob Storage
             conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
             container_name = os.getenv("AZURE_BLOB_CONTAINER_NAME")
             blob_service_client = BlobServiceClient.from_connection_string(conn_str)
 
-            # Ensure container exists (no-op if already exists)
             container_client = blob_service_client.get_container_client(container_name)
             try:
                 container_client.create_container()
@@ -670,14 +681,12 @@ def export_data_to_excel():
             blob_client.upload_blob(excel_buffer, overwrite=True)
             print(f"[TASK] Uploaded Excel to blob: {blob_name}", flush=True)
 
-            # Update and delete exported rows from temp_table
             with engine.begin() as conn2:
                 conn2.execute(text("""
                     UPDATE temp_table SET status = 'exported' 
                     WHERE status = 'pending' 
                 """))
                 print("[TASK] Updated rows to 'exported'", flush=True)
-
                 conn2.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
                 print("[TASK] Deleted exported rows", flush=True)
 
@@ -802,49 +811,56 @@ def view_temp_documents(api_key: str = Depends(verify_api_key)):
     except Exception as e:
         print(f"[API] view-temp-documents failed: {e}", flush=True)
         return {"error": f"Failed to fetch data: {str(e)}"}
-    
-
 
 @app.post("/delete-temp-documents/")
 def delete_temp_documents(api_key: str = Depends(verify_api_key)):
     try:
         engine = get_db_engine()
-
-        # Use engine.begin() for automatic transaction handling and committing
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM temp_table"))
-        
         return {"message": "All documents from temp_table have been deleted."}
     except Exception as e:
         return {"error": f"Deletion failed: {str(e)}"}
 
-
-
-
 # ------------------------------------------------------------------------------
-# Scheduler (20:10 IST daily, same as your code)
+# Scheduler (12:45 AM IST daily) with single-instance guard
 # ------------------------------------------------------------------------------
 scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+SCHED_LOCK_PATH = "/tmp/scheduler.lock"
+
+def start_scheduler_guarded():
+    if os.getenv("RUN_SCHEDULER", "0") != "1":
+        print("[SCHEDULER] Skipped (RUN_SCHEDULER not set)", flush=True)
+        return
+    lock = FileLock(SCHED_LOCK_PATH)
+    try:
+        with lock.acquire(timeout=0):  # only one worker wins
+            scheduler.add_job(
+                run_both_tasks,
+                CronTrigger(hour=1, minute=15),  # 1:15 AM IST
+                id="run_both_tasks_daily",
+                replace_existing=True
+            )
+            scheduler.start()
+            print("[SCHEDULER] APScheduler started", flush=True)
+            job = scheduler.get_job("run_both_tasks_daily")
+            print("[SCHEDULER] Next run time:", job.next_run_time, flush=True)
+    except Timeout:
+        print("[SCHEDULER] Skipped (another worker owns the scheduler)", flush=True)
 
 @app.on_event("startup")
-async def start_scheduler():
-    if os.getenv("RUN_SCHEDULER", "0") == "1":
-        scheduler.add_job(
-            run_both_tasks,
-            CronTrigger(hour=0, minute=45),  # 12:45 AM
-            id="run_both_tasks_daily",
-            replace_existing=True
-        )
-        scheduler.start()
-        print("[SCHEDULER] APScheduler started", flush=True)
-        job = scheduler.get_job("run_both_tasks_daily")
-        print("[SCHEDULER] Next run time:", job.next_run_time, flush=True)
-    else:
-        print("[SCHEDULER] Skipped (RUN_SCHEDULER not set)", flush=True)
-
-
+async def on_startup():
+    print("current_date:", datetime.now().strftime("%d-%m-%Y"), flush=True)
+    # Initialize DB safely (no race, no data loss)
+    init_db()
+    # Start scheduler only once across workers
+    start_scheduler_guarded()
 
 @app.on_event("shutdown")
 async def shutdown_scheduler():
-    scheduler.shutdown(wait=False)
-    print("[SCHEDULER] APScheduler stopped", flush=True)
+    try:
+        scheduler.shutdown(wait=False)
+        print("[SCHEDULER] APScheduler stopped", flush=True)
+    except Exception:
+        # If this worker didn’t own the scheduler, shutdown may raise; ignore.
+        pass
