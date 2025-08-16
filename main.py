@@ -763,25 +763,21 @@ def delete_temp_documents(api_key: str = Depends(verify_api_key)):
 
 
 
-scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
-
 @app.on_event("startup")
 async def start_scheduler():
-    # Do NOT run immediately. Only run at the scheduled time.
     scheduler.add_job(
         run_both_tasks,
-        CronTrigger(hour=16, minute=30),  # <-- 16:30 PM IST daily
+        CronTrigger(hour=17, minute=40),  # 5:40 PM IST daily
         id="run_both_tasks_daily",
-        replace_existing=True
+        replace_existing=True,
+        next_run_time=None  # prevents immediate run
     )
     scheduler.start()
-    print("APScheduler started: daily 16:30 Asia/Kolkata")
-
+    print("APScheduler started: daily 17:40 Asia/Kolkata")
 @app.on_event("shutdown")
 async def shutdown_scheduler():
     scheduler.shutdown(wait=False)
     print("APScheduler stopped")
-
 
 
 
