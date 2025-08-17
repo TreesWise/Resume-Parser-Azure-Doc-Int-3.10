@@ -843,10 +843,11 @@ def start_scheduler_guarded():
         with lock.acquire(timeout=0):  # only one worker wins
             scheduler.add_job(
                 run_both_tasks,
-                CronTrigger(hour=2, minute=45, timezone=SCHED_TZ),  # 2:45 AM IST
+                CronTrigger(hour=19, minute=0, timezone=SCHED_TZ),  # 7:00 PM IST
                 id="run_both_tasks_daily",
                 replace_existing=True
             )
+
             scheduler.start()
             job = scheduler.get_job("run_both_tasks_daily")
             print("[SCHEDULER] APScheduler started", flush=True)
