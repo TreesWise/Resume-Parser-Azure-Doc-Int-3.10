@@ -861,12 +861,15 @@ def start_scheduler_guarded():
                 replace_existing=True
             )
             
-            
             scheduler.start()
-            job = scheduler.get_job("run_both_tasks_daily")
+            
+            job = scheduler.get_job("run_both_tasks_weekly")  # <-- use the correct ID
             print("[SCHEDULER] APScheduler started", flush=True)
             print("[SCHEDULER] TZ:", scheduler.timezone, flush=True)
-            print("[SCHEDULER] Next run time:", job.next_run_time, flush=True)
+            if job is not None:
+                print("[SCHEDULER] Next run time:", job.next_run_time, flush=True)
+            else:
+                print("[SCHEDULER] Job not found!", flush=True)
     except Timeout:
         print("[SCHEDULER] Skipped (another worker owns the scheduler)", flush=True)
 
