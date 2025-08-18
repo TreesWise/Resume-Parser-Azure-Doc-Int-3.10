@@ -522,7 +522,7 @@ async def upload_file(api_key: str = Depends(verify_api_key), file: UploadFile =
 
 
 
-#code change by adding the local database
+#code change by adding the local database(unidentified document mapping code)
 
 
 
@@ -650,8 +650,8 @@ def export_data_to_excel():
         with engine.begin() as conn:
             print("[TASK] Querying pending rows from temp_table...", flush=True)
             result = conn.execute(text("""
-                SELECT * FROM temp_table 
-                WHERE TRIM(status) = 'pending'
+                SELECT * FROM temp_table
+                WHERE TRIM(status) = 'pending' AND DATE(CreatedDate) < DATE('now')
             """))
             data = result.fetchall()
             print(f"[TASK] Fetched {len(data)} rows", flush=True)
@@ -685,11 +685,12 @@ def export_data_to_excel():
 
             with engine.begin() as conn2:
                 conn2.execute(text("""
-                    UPDATE temp_table SET status = 'exported' 
-                    WHERE status = 'pending' 
+                    UPDATE temp_table
+                    SET status='exported'
+                    WHERE TRIM(status) = 'pending' AND DATE(CreatedDate) < DATE('now') 
                 """))
                 print("[TASK] Updated rows to 'exported'", flush=True)
-                conn2.execute(text("DELETE FROM temp_table WHERE status = 'exported'"))
+                conn2.execute(text("DELETE FROM temp_table WHERE TRIM(status) = 'exported' AND DATE(CreatedDate) < DATE('now')"))
                 print("[TASK] Deleted exported rows", flush=True)
 
     except Exception as e:
@@ -841,14 +842,27 @@ def start_scheduler_guarded():
     lock = FileLock(SCHED_LOCK_PATH)
     try:
         with lock.acquire(timeout=0):  # only one worker wins
+            # scheduler.add_job(
+            #     run_both_tasks,
+            #     CronTrigger(hour=19, minute=0, timezone=SCHED_TZ),  # 7:00 PM IST
+            #     id="run_both_tasks_daily",
+            #     replace_existing=True
+            # )
+
             scheduler.add_job(
                 run_both_tasks,
-                CronTrigger(hour=19, minute=0, timezone=SCHED_TZ),  # 7:00 PM IST
-                id="run_both_tasks_daily",
+                CronTrigger(
+                    day_of_week="mon",   # Monday
+                    hour=0,              # 12 AM
+                    minute=0,
+                    timezone=SCHED_TZ
+                ),
+                id="run_both_tasks_weekly",
                 replace_existing=True
             )
-
-            scheduler.start()
+            
+            
+                        scheduler.start()
             job = scheduler.get_job("run_both_tasks_daily")
             print("[SCHEDULER] APScheduler started", flush=True)
             print("[SCHEDULER] TZ:", scheduler.timezone, flush=True)
