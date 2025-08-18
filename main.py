@@ -862,7 +862,7 @@ def start_scheduler_guarded():
             )
             
             
-                        scheduler.start()
+            scheduler.start()
             job = scheduler.get_job("run_both_tasks_daily")
             print("[SCHEDULER] APScheduler started", flush=True)
             print("[SCHEDULER] TZ:", scheduler.timezone, flush=True)
