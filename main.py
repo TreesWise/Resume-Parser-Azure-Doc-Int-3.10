@@ -1942,6 +1942,7 @@ SCHED_TZ = pytz.timezone("Asia/Kolkata")
 scheduler = AsyncIOScheduler(timezone=SCHED_TZ)
 SCHED_LOCK_PATH = "/tmp/scheduler.lock"
 
+
 def start_scheduler_guarded(): 
     if os.getenv("RUN_SCHEDULER", "0") != "1":
         print("[SCHEDULER] Skipped (RUN_SCHEDULER not set)", flush=True)
@@ -1950,14 +1951,26 @@ def start_scheduler_guarded():
     lock = FileLock(SCHED_LOCK_PATH)
     try:
         with lock.acquire(timeout=0):  # only one worker wins
+            # scheduler.add_job(
+            #     run_both_tasks,
+            #     CronTrigger(
+            #         hour=11,             # Current hour
+            #         minute=35,           # Current minute
+            #         timezone=SCHED_TZ    # Correct timezone (Asia/Kolkata)
+            #     ),
+            #     id="run_both_tasks_now",   # Change the ID to reflect immediate execution
+            #     replace_existing=True
+            # )
+
             scheduler.add_job(
                 run_both_tasks,
                 CronTrigger(
-                    hour=11,             # Current hour
-                    minute=35,           # Current minute
-                    timezone=SCHED_TZ    # Correct timezone (Asia/Kolkata)
+                    day_of_week="mon",   # Monday
+                    hour=0,              # 12 AM
+                    minute=0,
+                    timezone=SCHED_TZ    # Asia/Kolkata
                 ),
-                id="run_both_tasks_now",   # Change the ID to reflect immediate execution
+                id="run_both_tasks_weekly_mon_midnight",
                 replace_existing=True
             )
 
@@ -1972,6 +1985,7 @@ def start_scheduler_guarded():
                 print("[SCHEDULER] Job not found!", flush=True)
     except Timeout:
         print("[SCHEDULER] Skipped (another worker owns the scheduler)", flush=True)
+
 
 @app.on_event("startup")
 async def on_startup():
