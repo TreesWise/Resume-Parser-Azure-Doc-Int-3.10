@@ -749,8 +749,9 @@ def certificate_openai(certificate_table):
     7. Convert all dates to DD-MM-YYYY format
     8. If the PlaceOfIssue field is present but the CountryOfIssue field is missing, determine the country corresponding to the PlaceOfIssue and populate it in the CountryOfIssue field.
     9. Fix broken words caused by accidental spaces (e.g., 'Carri er')
-    10. DO NOT drop or skip any rows or fields in the certificate_table.
-
+    10. **Do not modify certificate numbers (index "0") in any way** — preserve them exactly as provided (keep formatting, spaces, leading zeros, special characters, etc.).
+    11. DO NOT drop or skip any rows or fields in the certificate_table.
+    
     Here is the input dictionary:
     {certificate_table}
 
