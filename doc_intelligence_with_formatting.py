@@ -736,16 +736,20 @@ def certificate_openai(certificate_table):
     - Keys are column indices as strings.
     - Values are cell values from that row, matched to the correct column index.
     - If a value is missing or the row has fewer elements than the number of columns, fill the missing ones with null.
-    3. If any field contains **two dates separated by a slash** or **two dates separated by a comma** (e.g., `"17.04.2019/17.04.2024"`, `"17.04.2019,17.04.2024"` ), split them such that:
+    3. If any cell in the **Certificate Name** column contains multiple values separated by newline characters (e.g., "Seaman's book\nInternational passport"):
+    - The **first certificate name**(e.g., Seaman's book) stays in the original row with its existing data.
+    - The **second certificate names** should not create new rows. Instead:
+     - Place them into the nearest following row’s empty CertificateName field (index "1"), while keeping that row’s existing data unchanged. 
+    4. If any field contains **two dates separated by a slash** or **two dates separated by a comma** (e.g., `"17.04.2019/17.04.2024"`, `"17.04.2019,17.04.2024"` ), split them such that:
     - The **first date** goes to the `"DateOfIssue"` column (index `"4"`).
     - The **second date** goes to the `"DateOfExpiry"` column (index `"5"`).
     - This correction should apply **regardless of which field** originally contained the two dates (e.g., it might come in index `"2"` or `"5"`).
-    4. Maintain the same number of fields per row as the number of columns, and ensure no data is lost.
-    5. Preserve the original order of rows.
-    6. Convert all dates to DD-MM-YYYY format
-    7. If the PlaceOfIssue field is present but the CountryOfIssue field is missing, determine the country corresponding to the PlaceOfIssue and populate it in the CountryOfIssue field.
-    8. Fix broken words caused by accidental spaces (e.g., 'Carri er')
-    9. DO NOT drop or skip any rows or fields in the certificate_table.
+    5. Maintain the same number of fields per row as the number of columns, and ensure no data is lost.
+    6. Preserve the original order of rows.
+    7. Convert all dates to DD-MM-YYYY format
+    8. If the PlaceOfIssue field is present but the CountryOfIssue field is missing, determine the country corresponding to the PlaceOfIssue and populate it in the CountryOfIssue field.
+    9. Fix broken words caused by accidental spaces (e.g., 'Carri er')
+    10. DO NOT drop or skip any rows or fields in the certificate_table.
 
     Here is the input dictionary:
     {certificate_table}
