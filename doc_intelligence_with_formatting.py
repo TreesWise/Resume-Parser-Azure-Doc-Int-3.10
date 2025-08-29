@@ -693,6 +693,17 @@ def basic_openai(basic_table):
     3. Convert all dates to DD-MM-YYYY format
     4. Replace country names in Nationality with their demonym (e.g., Russia → Russian)
     5. Normalize gender values (male → Male, female → Female)
+    6. Normalize the "Country" field:
+    - Remove any leading labels or descriptors (e.g., words like "country", "residency", "city", etc.).
+    - If the remaining value contains multiple parts separated by delimiters (any of `/ | , ; - : >`), split on the first delimiter.
+    - Take the **country** as:
+        a) the part that matches a known country name (case-insensitive), if present; otherwise
+        b) the first non-empty part after trimming.
+    - Trim extra spaces, collapse repeated whitespace, and title-case names (preserve accents and standard abbreviations like USA, UK, UAE).
+    7. Populate the "City" field:
+        - If, after applying rule 6, there is a second non-empty part from the split, assign it to **City** after trimming and normalizing spacing (title-case).
+        - If no second part exists, set City to `null`.
+        - If the detected country and city are identical, keep the value as Country and set City to `null`.
 
     Here is the input dictionary:
     {basic_table}
