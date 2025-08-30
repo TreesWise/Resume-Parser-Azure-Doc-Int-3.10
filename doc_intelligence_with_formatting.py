@@ -1505,7 +1505,8 @@ from docx2pdf import convert
 import platform
 import subprocess
 import asyncio
-
+import logging
+import sys
 
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -1514,6 +1515,16 @@ OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION")
 
 # with open("output_format.json", "r", encoding="utf-8") as f:
 #     expected_structure = json.load(f)
+
+# Configure logging globally for both files
+logging.basicConfig(
+level=logging.INFO, # Change to DEBUG for detailed logs
+format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+handlers=[
+logging.StreamHandler(sys.stdout)
+]
+)
+logger = logging.getLogger("resume_parser")
 
 def extract_date_fields(structured_json):
     date_fields = {}
@@ -1625,16 +1636,20 @@ def upload_to_blob_storage(file_path, container_name, connection_string):
         
         with open(file_path, "rb") as data:
             blob_client.upload_blob(data, overwrite=True)
-        
-        print(f"File {file_path} successfully uploaded to {container_name}.")
+            
+        logger.info("File %s successfully uploaded to %s.", file_path, container_name)
     except Exception as e:
-        print(f"Error uploading file to Blob Storage: {e}")
+        logger.error("Error uploading file to Blob Storage: %s", e, exc_info=True)
+    #     print(f"File {file_path} successfully uploaded to {container_name}.")
+    # except Exception as e:
+    #     print(f"Error uploading file to Blob Storage: {e}")
 
 def validate_parsed_resume(extracted_info, file_path, confidence_threshold=0.8, container_name=None, connection_string=None):
     errors = []
     
     # Check confidence score
-    print("confidence score ----------------------------------------------", extracted_info.get("confidence", 1))    
+    # print("confidence score ----------------------------------------------", extracted_info.get("confidence", 1))    
+    logger.info("Confidence score----------------------------------------------: %s", extracted_info.get("confidence", 1))
     if extracted_info.get("confidence", 1) < confidence_threshold:
         errors.append("Low confidence score")
         
@@ -1764,10 +1779,7 @@ def certificate_openai(certificate_table):
     - Keys are column indices as strings.
     - Values are cell values from that row, matched to the correct column index.
     - If a value is missing or the row has fewer elements than the number of columns, fill the missing ones with null.
-    3. If any cell in the **Certificate Name** column contains multiple values separated by newline characters (e.g., "Seaman's book\nInternational passport"):
-    - The **first certificate name**(e.g., Seaman's book) stays in the original row with its existing data.
-    - The **second certificate names** should not create new rows. Instead:
-     - Place them into the nearest following row’s empty CertificateName field (index "1"), while keeping that row’s existing data unchanged. 
+    
     4. If any field contains **two dates separated by a slash** or **two dates separated by a comma** (e.g., `"17.04.2019/17.04.2024"`, `"17.04.2019,17.04.2024"` ), split them such that:
     - The **first date** goes to the `"DateOfIssue"` column (index `"4"`).
     - The **second date** goes to the `"DateOfExpiry"` column (index `"5"`).
@@ -1777,8 +1789,25 @@ def certificate_openai(certificate_table):
     7. Convert all dates to DD-MM-YYYY format
     8. If the PlaceOfIssue field is present but the CountryOfIssue field is missing, determine the country corresponding to the PlaceOfIssue and populate it in the CountryOfIssue field.
     9. Fix broken words caused by accidental spaces (e.g., 'Carri er')
-    10. **Do not modify certificate numbers (index "0") in any way** — preserve them exactly as provided (keep formatting, spaces, leading zeros, special characters, etc.).
-    11. DO NOT drop or skip any rows or fields in the certificate_table.
+    10. DO NOT drop or skip any rows or fields in the certificate_table.
+    11. If any cell in the **Certificate Name** column contains multiple values separated by newline characters "\\n":
+    - The **first certificate name** stays in the original cell with its existing data.
+    - The **second certificate names** should not create new cell. Instead:
+     - Place them into the nearest following cell’s empty CertificateName field (index "1"), while keeping that cell's existing data unchanged.\
+    ### Example 1
+    Input:
+
+    "columns": ["0", "1", "2", "3", "4", "5", "6", "7", "8"],
+    "rows": [
+        ["12345", "Seaman's book\nInternational passport", "null", "null", "17-06-2024", "17-06-2034", "null", "null", "Nederlands"],
+        ["67890", "null", "null", "null", "14-01-2016", "30-11-2030", "null", "null", "Ukraine"]
+    ]
+
+    Output:
+    [
+    "0": "12345", "1": "Seaman's book", "2": "null", "3": "null", "4": "17-06-2024", "5": "17-06-2034", "6": "null", "7": "null", "8": "Nederlands",
+    "0": "67890", "1": "International passport", "2": "null", "3": "null", "4": "14-01-2016", "5": "30-11-2030", "6": "null", "7": "null", "8": "Ukraine"
+    ]
 
     Here is the input dictionary:
     {certificate_table}
@@ -1925,7 +1954,8 @@ async def convert_docx_to_pdf(docx_path):
             doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17)  # PDF format
             doc.Close()
             word.Quit()
-            print(f" Converted {docx_path} to {pdf_path} using Microsoft Word")
+            # print(f" Converted {docx_path} to {pdf_path} using Microsoft Word")
+            logger.info("Converted %s to %s using Microsoft Word", docx_path, pdf_path)
         else:
             libreoffice_path = "/usr/bin/libreoffice"
             if not os.path.exists(libreoffice_path):
@@ -1936,12 +1966,13 @@ async def convert_docx_to_pdf(docx_path):
                 "--outdir", os.path.dirname(docx_path), docx_path
             )
             await process.communicate()  # Ensure subprocess completes
-
-            print(f" Converted {docx_path} to {pdf_path} using LibreOffice")
+            logger.info("Converted %s to %s using LibreOffice", docx_path, pdf_path)
+            # print(f" Converted {docx_path} to {pdf_path} using LibreOffice")
 
         return pdf_path
     except Exception as e:
-        print(f" DOCX to PDF conversion failed: {e}")
+        # print(f" DOCX to PDF conversion failed: {e}")
+        logger.error("DOCX to PDF conversion failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"DOCX to PDF conversion failed: {e}")
 
 def replace_values(data, mapping):
@@ -1980,7 +2011,8 @@ def replace_country(data, mapping):
             
             # Print if value changed (only for string values)
             if isinstance(value, str) and value != new_value:
-                print(f"Mapping country: '{value}' → '{new_value}'")
+                # print(f"Mapping country: '{value}' → '{new_value}'")
+                logger.debug("Mapping country: '%s' → '%s'", value, new_value)
         return new_dict
         
     elif isinstance(data, list):
@@ -2023,6 +2055,7 @@ def reposition_fields(table_data, desired_order):
         updated_table_data.append(reordered_row)
 
     return updated_table_data
+
 
 
 
