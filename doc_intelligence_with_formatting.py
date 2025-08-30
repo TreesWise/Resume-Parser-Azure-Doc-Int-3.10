@@ -1489,7 +1489,6 @@
 
 
 
-
 from openai import AzureOpenAI
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
@@ -1767,53 +1766,91 @@ def basic_openai(basic_table):
 
 def certificate_openai(certificate_table):
     prompt = f"""
-    You are given a dictionary with the following structure:
-    - "table_name": the name of the table.
-    - "columns": a list of column names.
-    - "rows": a list of lists, where each sublist represents a row corresponding to the columns.
+You are given a dictionary with the following structure:
+- "table_name": the name of the table.
+- "columns": a list of column names.
+- "rows": a list of lists, where each sublist represents a row of data.
 
-    Your task is to convert this dictionary into a list of dictionaries with the following rules:
+Your task is to transform this dictionary into a list of dictionaries under the key "certificate_table", following these rules:
 
-    1. The first dictionary should map column indices as strings ("0", "1", ..., "8") to their corresponding column names in order.
-    2. Each subsequent dictionary should represent one row of data, where:
-    - Keys are column indices as strings.
-    - Values are cell values from that row, matched to the correct column index.
-    - If a value is missing or the row has fewer elements than the number of columns, fill the missing ones with null.
-    
-    4. If any field contains **two dates separated by a slash** or **two dates separated by a comma** (e.g., `"17.04.2019/17.04.2024"`, `"17.04.2019,17.04.2024"` ), split them such that:
-    - The **first date** goes to the `"DateOfIssue"` column (index `"4"`).
-    - The **second date** goes to the `"DateOfExpiry"` column (index `"5"`).
-    - This correction should apply **regardless of which field** originally contained the two dates (e.g., it might come in index `"2"` or `"5"`).
-    5. Maintain the same number of fields per row as the number of columns, and ensure no data is lost.
-    6. Preserve the original order of rows.
-    7. Convert all dates to DD-MM-YYYY format
-    8. If the PlaceOfIssue field is present but the CountryOfIssue field is missing, determine the country corresponding to the PlaceOfIssue and populate it in the CountryOfIssue field.
-    9. Fix broken words caused by accidental spaces (e.g., 'Carri er')
-    10. DO NOT drop or skip any rows or fields in the certificate_table.
-    11. If any cell in the **Certificate Name** column contains multiple values separated by newline characters "\\n":
-    - The **first certificate name** stays in the original cell with its existing data.
-    - The **second certificate names** should not create new cell. Instead:
-     - Place them into the nearest following cell’s empty CertificateName field (index "1"), while keeping that cell's existing data unchanged.\
-    ### Example 1
-    Input:
+1. Column Mapping  
+   - The first dictionary should map column indices as strings ("0", "1", ..., "N") to their corresponding column names in order.
 
-    "columns": ["0", "1", "2", "3", "4", "5", "6", "7", "8"],
-    "rows": [
-        ["12345", "Seaman's book\nInternational passport", "null", "null", "17-06-2024", "17-06-2034", "null", "null", "Nederlands"],
-        ["67890", "null", "null", "null", "14-01-2016", "30-11-2030", "null", "null", "Ukraine"]
-    ]
+2. Row Transformation  
+   - Each subsequent dictionary should represent one row of data.  
+   - Keys = column indices as strings.  
+   - Values = cell values from that row.  
+   - If a value is missing or the row has fewer elements than the number of columns, fill the missing values with null.
 
-    Output:
+3. **Certificate Name Handling**  
+   - If a cell in the Certificate Name column contains multiple certificates separated by newline characters ("\\n"):  
+     - Keep the first certificate name in the original row.  
+     - The second certificate name must **not create a new duplicate row**.  
+     - Instead, place it into the nearest following row’s empty Certificate Name field (index "1"), while keeping that row’s existing data unchanged.  
+     - Only if no such row exists, create a new row with that certificate name.  
+     - Ensure no duplication of certificate numbers, dates, or country values.
+    Example Input Rows:
     [
-    "0": "12345", "1": "Seaman's book", "2": "null", "3": "null", "4": "17-06-2024", "5": "17-06-2034", "6": "null", "7": "null", "8": "Nederlands",
-    "0": "67890", "1": "International passport", "2": "null", "3": "null", "4": "14-01-2016", "5": "30-11-2030", "6": "null", "7": "null", "8": "Ukraine"
+        ['00490/2024', 'Medical Care\\nShip Security Officer', '13.03.2024', '13.03.2029\\n13.03.2029', 'Ukraine', None, None, None, None],
+        ['00737/2024', None, '10.03.2024', None, 'Ukraine', None, None, None, None]
     ]
 
-    Here is the input dictionary:
-    {certificate_table}
+    Example Output Rows:
+    {{
+    "0": "00490/2024",
+    "1": "Medical Care",
+    "2": null,
+    "3": null,
+    "4": "13-03-2024",
+    "5": "13-03-2029",
+    "6": null,
+    "7": null,
+    "8": "Ukraine"
+    }},
+    {{
+    "0": "00737/2024",
+    "1": "Ship Security Officer",
+    "2": null,
+    "3": null,
+    "4": "10-03-2024",
+    "5": null,
+    "6": null,
+    "7": null,
+    "8": "Ukraine"
+    }}
+4. Date Splitting & Correction  
+   - If any field contains two dates separated by "/" or "," (e.g., "17.04.2019/17.04.2024", "17.04.2019,17.04.2024"):  
+     - Place the first date in the "DateOfIssue" column (index "4").  
+     - Place the second date in the "DateOfExpiry" column (index "5").  
+     - This applies regardless of which column originally contained the dates.
 
-    Return the final JSON as a list of dictionaries under the key "certificate_table".
-    """
+5. Date Formatting  
+   - Convert all dates into DD-MM-YYYY format.
+
+6. Data Preservation  
+   - Maintain the same number of fields per row as the number of columns.  
+   - Do not drop or skip any rows or fields.  
+   - Preserve the original row order.
+
+7. Country of Issue Inference  
+   - If PlaceOfIssue is provided but CountryOfIssue is missing, determine the country corresponding to the place and populate it.
+
+8. Text Cleaning  
+   - Fix broken words caused by accidental spaces (e.g., "Carri er" → "Carrier").
+
+---
+
+
+
+---
+
+Here is the input dictionary:
+{certificate_table}
+
+Return the final JSON as a list of dictionaries under the key "certificate_table".
+"""
+
+
 
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
