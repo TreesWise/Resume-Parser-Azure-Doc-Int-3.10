@@ -2330,7 +2330,7 @@ async def upload_file(
             return reordered_data
        
  
-        def reorder_certificate_table(data):
+               def reorder_certificate_table(data):
             if not data:
                 return []
  
@@ -2357,15 +2357,11 @@ async def upload_file(
  
  
         reordered_basic = reorder_basic_details_table(basic_details_merge)
-        # print(reordered_basic)
+        print(reordered_basic)
         reordered_certificates = reorder_certificate_table(certificate_table_merge)
-        # print(reordered_certificates)
+        print(reordered_certificates)
         reordered_experience = reorder_experience_table(experience_table_merge)
-        # print(reordered_experience)
-        
-        logger.debug("Reordered Basic: %s", reordered_basic)
-        logger.debug("Reordered Certificates: %s", reordered_certificates)
-        logger.debug("Reordered Experience: %s", reordered_experience)
+        print(reordered_experience)
  
            
         final_output = {
@@ -2377,11 +2373,18 @@ async def upload_file(
             },
             "utc_time_stamp": datetime.utcnow().strftime("%d/%m/%Y, %H:%M:%S")
         }
- 
- 
+
+
+        cert_only_payload = {
+                "data": {
+                    "certificate_table": final_output["data"]["certificate_table"]
+                }
+            }
+
+            
+            
         validation_errors = validate_parsed_resume(extracted_info, temp_file_path, 0.8, container_name, connection_string)
-        # print(validation_errors)
-        logger.info("Validation result: %s", validation_errors)
+        print(validation_errors)
  
  
  
@@ -2389,9 +2392,11 @@ async def upload_file(
 
         current_mapping_dict = load_mapping_dict_from_blob()   # NEW
         
-        course_map = replace_values(final_output, current_mapping_dict)
+        # course_map = replace_values(final_output, current_mapping_dict)
+        mapped_cert_only = replace_values(cert_only_payload, current_mapping_dict)
+        final_output["data"]["certificate_table"] = mapped_cert_only["data"]["certificate_table"]
 
-        rank_map = replace_rank(course_map, rank_mapping)
+        rank_map = replace_rank(final_output, rank_mapping)
         rank_map=replace_country(rank_map,country_mapping)
         final_output['data']['basic_details'] = replace_country(rank_map['data']['basic_details'], country_mapping)
         final_output['data']['certificate_table'] = replace_country(rank_map['data']['certificate_table'], country_mapping)
@@ -2438,8 +2443,7 @@ async def upload_file(
    
             # Update the data with filtered experience_table
             rank_map["data"]["experience_table"] = filtered_experience
-            logger.info("Filtered experience_table: %s", filtered_experience)
-            # print(filtered_experience)
+            print(filtered_experience)
         return rank_map
        
     except HTTPException as http_exc:
@@ -2448,7 +2452,6 @@ async def upload_file(
  
     except Exception as e:
         # Catch-all for unexpected errors
-        logger.error("Unexpected error in upload_file: %s", e, exc_info=True)
         return JSONResponse(
             status_code=500,
             content={
@@ -2461,7 +2464,8 @@ async def upload_file(
     finally:
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
-            logger.debug("Temporary file removed: %s", temp_file_path)
+ 
+ 
  
  
  
