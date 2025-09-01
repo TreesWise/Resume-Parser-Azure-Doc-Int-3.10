@@ -2330,7 +2330,7 @@ async def upload_file(
             return reordered_data
        
  
-               def reorder_certificate_table(data):
+        def reorder_certificate_table(data):
             if not data:
                 return []
  
