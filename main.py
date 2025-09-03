@@ -3086,28 +3086,28 @@ def start_scheduler_guarded():
     lock = FileLock(SCHED_LOCK_PATH)
     try:
         with lock.acquire(timeout=0):  # only one worker wins
-            # scheduler.add_job(
-            #     run_both_tasks,
-            #     CronTrigger(
-            #         hour=11,             # Current hour
-            #         minute=35,           # Current minute
-            #         timezone=SCHED_TZ    # Correct timezone (Asia/Kolkata)
-            #     ),
-            #     id="run_both_tasks_now",   # Change the ID to reflect immediate execution
-            #     replace_existing=True
-            # )
-
             scheduler.add_job(
                 run_both_tasks,
                 CronTrigger(
-                    day_of_week="mon",   # Monday
-                    hour=0,              # 12 AM
-                    minute=0,
-                    timezone=SCHED_TZ    # Asia/Kolkata
+                    hour=0,             # Current hour
+                    minute=0,           # Current minute
+                    timezone=SCHED_TZ    # Correct timezone (Asia/Kolkata)
                 ),
-                id="run_both_tasks_weekly_mon_midnight",
+                id="run_both_tasks_now",   # Change the ID to reflect immediate execution
                 replace_existing=True
             )
+
+            # scheduler.add_job(
+            #     run_both_tasks,
+            #     CronTrigger(
+            #         day_of_week="mon",   # Monday
+            #         hour=0,              # 12 AM
+            #         minute=0,
+            #         timezone=SCHED_TZ    # Asia/Kolkata
+            #     ),
+            #     id="run_both_tasks_weekly_mon_midnight",
+            #     replace_existing=True
+            # )
 
         
             scheduler.start()
