@@ -1823,6 +1823,52 @@ Your task is to transform this dictionary into a list of dictionaries under the 
      - Place the first date in the "DateOfIssue" column (index "4").  
      - Place the second date in the "DateOfExpiry" column (index "5").  
      - This applies regardless of which column originally contained the dates.
+   - If "DateOfExpiry" contains two dates separated by "/" or "," (e.g., "17.04.2019/17.04.2024", "17.04.2019,17.04.2024"):
+     - Place the first date in "DateOfExpiry" column of same cell(index "5").
+     - Place it into the nearest following row’s empty "DateOfExpiry" (index "5"), while keeping that row’s existing data unchanged.
+     - Also make sure that it doesn't create a new cell. 
+     Example Input Rows:
+     [
+     ['MUM 131403', 'Seaman Book', '29-Jan-2014', '28-Jan-2024\n09-Nov-2031', 'India', None, None, None, None],
+     ['Z6083144', 'Passport', '10-Nov-2021', None, 'India', None, None, None, None]
+     ]
+     
+     Example Output Rows:
+     {{
+        "0": "CertificateNo",
+        "1": "CertificateName",
+        "2": "PlaceOfIssue",
+        "3": "IssuedBy",
+        "4": "DateOfIssue",
+        "5": "DateOfExpiry",
+        "6": "Grade",
+        "7": "Others",
+        "8": "CountryOfIssue"
+      }},
+      {{
+        "0": "MUM 131403",
+        "1": "Seaman Book",
+        "2": null,
+        "3": null,
+        "4": "29-01-2014",
+        "5": "28-01-2024",
+        "6": null,
+        "7": null,
+        "8": "India"
+      }},
+      {{
+        "0": "Z6083144",
+        "1": "Passport",
+        "2": null,
+        "3": null,
+        "4": "10-11-2021",
+        "5": "09-Nov-2031",
+        "6": null,
+        "7": null,
+        "8": "India"
+      }}
+      
+      Apply this Mapping all over in the certificate_table section. 
 
 5. Date Formatting  
    - Convert all dates into DD-MM-YYYY format.
