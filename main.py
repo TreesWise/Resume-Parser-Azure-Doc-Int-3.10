@@ -144,7 +144,6 @@ async def upload_file(
         # Extract JSON from document
         extracted_info = extract_resume_info(endpoint, key, model_id, temp_file_path)
  
- 
         fields_only = extracted_info["fields"] 
  
         tables = extracted_info.get('tables', [])
