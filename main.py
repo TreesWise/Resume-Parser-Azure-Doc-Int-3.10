@@ -125,7 +125,7 @@ async def upload_file(
 ):
     try:
         # Extract file extension
-        suffix = os.path.splitext(file.filename)[-1]
+        suffix = os.path.splitext(file.filename)[-1].lower()
         if suffix not in [".pdf", ".docx"]:
             raise HTTPException(status_code=400, detail="Only PDF and Word documents are allowed")
  
